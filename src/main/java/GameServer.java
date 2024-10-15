@@ -23,7 +23,7 @@ public class GameServer {
     private final Random random = new Random();
 
     private boolean gameStarted = false;
-    private boolean gameOver = false;  // Biến kiểm soát trạng thái kết thúc trò chơi
+    private boolean gameOver = false;
 
 
     public GameServer() throws IOException {
@@ -31,15 +31,17 @@ public class GameServer {
         System.out.println("Server started on port " + PORT);
     }
 
+    // Phương thức chính để khởi động server, gồm 2 luồng (gameLoop và nhận thông điệp từ client)
     public void start() {
         new Thread(this::gameLoop).start();
         new Thread(this::receiveClientMessages).start();
     }
 
+    // Vòng lặp chính của trò chơi, xử lý logic trò chơi, bao gồm việc tạo chướng ngại vật, di chuyển và kiểm tra va chạm
     private void gameLoop() {
         while (true) {
-            if (gameStarted && !gameOver) {  // Kiểm tra nếu trò chơi đang diễn ra và chưa kết thúc
-                if (random.nextInt(100) < 5) {
+            if (gameStarted && !gameOver) {
+                if (random.nextInt(100) < 10) {
                     createObstacle();
                 }
                 moveObstacles();
@@ -48,14 +50,14 @@ public class GameServer {
             }
 
             try {
-                Thread.sleep(16);  // Giữ tốc độ game khoảng 60 FPS
+                Thread.sleep(16);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
     }
 
-
+    // Nhận thông điệp từ client và xử lý chúng
     private void receiveClientMessages() {
         while (true) {
             try {
@@ -71,6 +73,7 @@ public class GameServer {
         }
     }
 
+    // Xử lý các thông điệp từ client như kết nối và di chuyển
     private void handleClientMessage(String message, InetAddress address, int port) {
         if (message.startsWith("CONNECT")) {
             handleConnect(address, port);
@@ -79,12 +82,13 @@ public class GameServer {
         }
     }
 
+    // Xử lý khi một client mới kết nối vào server
     private void handleConnect(InetAddress address, int port) {
         if (clients.size() < 2) {
             ClientInfo newClient = new ClientInfo(address, port);
             clients.add(newClient);
             playerScores.put(port, 0);
-            playerPositions.put(port, GAME_WIDTH / 2);  // Start players in the middle
+            playerPositions.put(port, GAME_WIDTH / 2);
             System.out.println("Player " + clients.size() + " connected.");
 
             if (clients.size() == 2) {
@@ -94,36 +98,40 @@ public class GameServer {
         }
     }
 
+    // Xử lý thông tin di chuyển của người chơi
     private void handleMove(String message, int port) {
         String[] parts = message.split(" ");
         int newX = Integer.parseInt(parts[1]);
         playerPositions.put(port, newX);
     }
 
+    // Tạo chướng ngại vật mới ngẫu nhiên xuất hiện từ phía trên
     private void createObstacle() {
         obstacles.add(new Obstacle(random.nextInt(GAME_WIDTH - OBSTACLE_SIZE), 0));
     }
 
+    // Di chuyển các chướng ngại vật từ trên xuống dưới
     private void moveObstacles() {
         for (Obstacle obstacle : obstacles) {
             obstacle.y += 5;
         }
-        obstacles.removeIf(obstacle -> obstacle.y > GAME_HEIGHT);  // Remove obstacles that leave the screen
+        obstacles.removeIf(obstacle -> obstacle.y > GAME_HEIGHT);
     }
 
+    // Kiểm tra va chạm giữa người chơi và chướng ngại vật
     private void checkCollisions() {
         for (ClientInfo client : clients) {
             int playerX = playerPositions.get(client.port);
-            Rectangle playerRect = new Rectangle(playerX, GAME_HEIGHT - 40, 50, 20);
+            Rectangle playerRect = new Rectangle(playerX, GAME_HEIGHT - MultiplayerGame.PLAYER_HEIGHT - 10, MultiplayerGame.PLAYER_WIDTH, MultiplayerGame.PLAYER_HEIGHT);
+
 
             List<Obstacle> obstaclesToRemove = new ArrayList<>();
             for (Obstacle obstacle : obstacles) {
-                Rectangle obstacleRect = new Rectangle(obstacle.x, obstacle.y, OBSTACLE_SIZE, OBSTACLE_SIZE);
+                Rectangle obstacleRect = new Rectangle(obstacle.x, obstacle.y, OBSTACLE_SIZE, OBSTACLE_SIZE); // Hitbox chướng ngại vật
 
                 if (playerRect.intersects(obstacleRect)) {
-                    // Collision detected - this player loses points, opponent gains points
                     updateScore(client.port, POINTS_PER_COLLISION);
-                    updateOpponentScore(client.port, POINTS_PER_DODGE);  // Opponent gains points
+                    updateOpponentScore(client.port, POINTS_PER_DODGE);
                     obstaclesToRemove.add(obstacle);
                 }
             }
@@ -131,27 +139,26 @@ public class GameServer {
         }
     }
 
+    // Cập nhật điểm của đối thủ khi người chơi va chạm với chướng ngại vật
     private void updateOpponentScore(int port, int points) {
         for (ClientInfo client : clients) {
             if (client.port != port) {
-                playerScores.merge(client.port, points, Integer::sum);  // Opponent gains points
+                playerScores.merge(client.port, points, Integer::sum);
             }
         }
     }
 
-
+    // Cập nhật điểm của người chơi, nếu đạt đủ điểm thì kết thúc trò chơi
     private void updateScore(int port, int points) {
         int newScore = playerScores.merge(port, points, Integer::sum);
         if (newScore >= WIN_SCORE) {
-            // Ngừng trò chơi ngay khi đạt điểm WIN_SCORE
-            gameOver = true;  // Biến kiểm soát kết thúc trò chơi
+            gameOver = true;
             broadcastMessage("GAME_OVER " + port);
             gameStarted = false;
         }
     }
 
-
-
+    // Truyền trạng thái trò chơi cho tất cả các client (bao gồm vị trí người chơi, chướng ngại vật và điểm số)
     private void broadcastGameState() {
         StringBuilder state = new StringBuilder("STATE ");
         for (Map.Entry<Integer, Integer> entry : playerPositions.entrySet()) {
@@ -168,6 +175,7 @@ public class GameServer {
         broadcastMessage(state.toString());
     }
 
+    // Truyền thông điệp tới tất cả các client
     private void broadcastMessage(String message) {
         byte[] data = message.getBytes();
         for (ClientInfo client : clients) {
@@ -184,6 +192,7 @@ public class GameServer {
         new GameServer().start();
     }
 
+    // Lớp lưu thông tin của client (người chơi)
     private static class ClientInfo {
         final InetAddress address;
         final int port;
@@ -194,6 +203,7 @@ public class GameServer {
         }
     }
 
+    // Lớp đại diện cho chướng ngại vật trong trò chơi
     private static class Obstacle {
         int x, y;
 
@@ -203,6 +213,7 @@ public class GameServer {
         }
     }
 
+    // Lớp đại diện cho hình chữ nhật (hitbox) để kiểm tra va chạm
     private static class Rectangle {
         int x, y, width, height;
 
@@ -213,6 +224,7 @@ public class GameServer {
             this.height = height;
         }
 
+        // Hàm kiểm tra nếu có sự giao nhau giữa hai hình chữ nhật (va chạm)
         boolean intersects(Rectangle other) {
             return this.x < other.x + other.width &&
                     this.x + this.width > other.x &&
